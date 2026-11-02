@@ -1,0 +1,115 @@
+# Builds CasTV into a signed APK on every push and publishes it as a GitHub release (pre-release outside main).
+# The build log is also pushed to the ci-status branch (ci/status.txt, ci/build.txt).
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Signing key
+        env:
+          CASTV_KEYSTORE_BASE64: ${{ secrets.CASTV_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$CASTV_KEYSTORE_BASE64" ]; then
+            printf '%s' "$CASTV_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/castv.keystore"
+            echo "CASTV_KEYSTORE=$RUNNER_TEMP/castv.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::notice::No CASTV_KEYSTORE_BASE64 secret; using the repository's fixed debug key."
+          fi
+
+      # Without a release key, a debug keystore kept in the Actions cache keeps the signature stable between builds,
+      # so new versions install over old ones.
+      - name: Stable debug key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: castv-debug-keystore-v1
+
+      - name: Unit tests and release build
+        id: build
+        env:
+          CASTV_KEYSTORE_PASSWORD: ${{ secrets.CASTV_KEYSTORE_PASSWORD }}
+          CASTV_KEY_ALIAS: ${{ secrets.CASTV_KEY_ALIAS }}
+          CASTV_KEY_PASSWORD: ${{ secrets.CASTV_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest :app:assembleRelease --continue --stacktrace 2>&1 | tee build.txt
+
+      - name: Publish the build log to ci-status
+        if: always()
+        env:
+          OUTCOME: ${{ steps.build.outcome }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+          RUN: ${{ github.run_number }}
+        run: |
+          set +e
+          tmp=$(mktemp -d)
+          mkdir -p "$tmp/ci"
+          { echo "outcome=$OUTCOME"; echo "sha=$SHA"; echo "ref=$REF"; echo "run=$RUN"; date -u +%FT%TZ; } > "$tmp/ci/status.txt"
+          { grep -E '^e: |error:|What went wrong|FAILED|BUILD (SUCCESSFUL|FAILED)' build.txt | head -300; echo '---- tail ----'; tail -200 build.txt; } > "$tmp/ci/build.txt" 2>/dev/null
+          for f in app/build/test-results/testDebugUnitTest/*.xml; do [ -f "$f" ] && cp "$f" "$tmp/ci/"; done
+          cd "$tmp"
+          git init -q -b ci-status
+          git config user.name "castv-ci"; git config user.email "castv-ci@users.noreply.github.com"
+          git add -A && git commit -q -m "Build $RUN ($OUTCOME) for $SHA"
+          git push -f -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-status:ci-status
+
+      - name: Name the APK
+        id: apk
+        if: steps.build.outcome == 'success'
+        run: |
+          v=$(tr -d '[:space:]' < version.txt)
+          name="CasTV-$v-${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$name"
+          echo "path=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.build.outcome == 'success'
+        with:
+          name: CasTV-apk
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Release
+        if: steps.build.outcome == 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: CasTV ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
+          prerelease: ${{ github.ref_name != 'main' }}
+          make_latest: ${{ github.ref_name == 'main' }}
+          body: |
+            CasTV for Android TV (Android 8.0+), built from ${{ github.ref_name }} @ ${{ github.sha }}.
+            Install: download the APK on the TV (e.g. with a downloader app) or copy it over, open it and allow installs from unknown sources.
+          files: ${{ steps.apk.outputs.path }}
