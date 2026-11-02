@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -191,7 +192,7 @@ fun duration(ms: Long): String {
 
 /** A panel dialog for the remote. */
 @Composable
-fun TvDialog(title: String, onDismiss: () -> Unit, width: Dp = 520.dp, content: @Composable () -> Unit) {
+fun TvDialog(title: String, onDismiss: () -> Unit, width: Dp = 520.dp, content: @Composable ColumnScope.() -> Unit) {
     val ui = LocalUi.current
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
