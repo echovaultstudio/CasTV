@@ -73,18 +73,17 @@ private fun Modifier.keys(k: Keys, press: KeyPress): Modifier = onPreviewKeyEven
         AKeyEvent.KEYCODE_DPAD_DOWN -> { if (down) k.onDown(); true }
         AKeyEvent.KEYCODE_DPAD_RIGHT -> { if (down) k.onRight(); true }
         AKeyEvent.KEYCODE_DPAD_LEFT -> {
-            if (down && n.repeatCount == 0) press.longFired = false
-            if (down && n.repeatCount >= 1 && !press.longFired) { press.longFired = true; k.onLongLeft() }
-            if (up && !press.longFired) k.onLeft()
+            when (press.handle(code, down, up, n.repeatCount, true)) { 1 -> k.onLeft(); 2 -> k.onLongLeft() }
             true
         }
         AKeyEvent.KEYCODE_DPAD_CENTER, AKeyEvent.KEYCODE_ENTER, AKeyEvent.KEYCODE_NUMPAD_ENTER -> {
-            if (down && n.repeatCount == 0) press.longFired = false
-            if (down && n.repeatCount >= 1 && !press.longFired) { press.longFired = true; k.onLongOk() }
-            if (up && !press.longFired) k.onOk()
+            when (press.handle(code, down, up, n.repeatCount, true)) { 1 -> k.onOk(); 2 -> k.onLongOk() }
             true
         }
-        AKeyEvent.KEYCODE_BACK, AKeyEvent.KEYCODE_ESCAPE -> { if (up) k.onBack(); true }
+        AKeyEvent.KEYCODE_BACK, AKeyEvent.KEYCODE_ESCAPE -> {
+            if (press.handle(code, down, up, n.repeatCount, false) == 1) k.onBack()
+            true
+        }
         AKeyEvent.KEYCODE_CHANNEL_UP, AKeyEvent.KEYCODE_PAGE_UP -> { if (down) k.onPageUp(); true }
         AKeyEvent.KEYCODE_CHANNEL_DOWN, AKeyEvent.KEYCODE_PAGE_DOWN -> { if (down) k.onPageDown(); true }
         AKeyEvent.KEYCODE_MENU -> { if (down) k.onMenu(); true }
@@ -524,15 +523,18 @@ fun SideMenu(vm: MainViewModel) {
         "Exit" to { if (vm.settings.confirmExit) confirmExit = true else vm.effects.tryEmit(Effect.Finish) },
     )
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(ui.panelStrong, ui.panel, Color.Transparent)))) {
-        Column(Modifier.width(320.dp).fillMaxHeight().padding(24.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.width(320.dp).fillMaxHeight().padding(horizontal = 24.dp, vertical = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Label("CasTV", Modifier.weight(1f), size = 26, bold = true, color = ui.accent)
+                Label("CasTV", Modifier.weight(1f), size = 24, bold = true, color = ui.accent)
                 Clock(false)
             }
             if (status.isNotEmpty()) Dim(status, maxLines = 2)
-            Spacer(Modifier.height(12.dp))
-            items.forEachIndexed { i, (label, run) ->
-                FocusRow(focusRequester = if (i == 0) first else null, onClick = run) { Label(label, size = 18) }
+            Spacer(Modifier.height(8.dp))
+            // Scrolls with the focus, so the last items (Exit) stay reachable on any screen size.
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                itemsIndexed(items) { i, (label, run) ->
+                    FocusRow(focusRequester = if (i == 0) first else null, onClick = run) { Label(label, size = 17) }
+                }
             }
         }
     }

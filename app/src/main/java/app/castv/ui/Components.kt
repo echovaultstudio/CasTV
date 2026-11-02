@@ -35,6 +35,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.composed
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,25 +72,19 @@ fun isSelectKey(code: Int) = code == AKeyEvent.KEYCODE_DPAD_CENTER || code == AK
  * Click with the remote's OK button (short and long press) and with touch. Long press fires once while the button
  * is held; the short click then doesn't fire.
  */
-fun Modifier.tvClickable(onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier {
-    var longFired = false
-    return this
+fun Modifier.tvClickable(onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier = composed {
+    val press = remember { KeyPress() }
+    val latestClick by rememberUpdatedState(onClick)
+    val latestLong by rememberUpdatedState(onLongClick)
+    this
         .onPreviewKeyEvent { ev ->
             val code = ev.nativeKeyEvent.keyCode
             if (!isSelectKey(code)) return@onPreviewKeyEvent false
-            when (ev.type) {
-                KeyEventType.KeyDown -> {
-                    if (ev.nativeKeyEvent.repeatCount == 0) longFired = false
-                    else if (ev.nativeKeyEvent.repeatCount >= 1 && !longFired && onLongClick != null) { longFired = true; onLongClick() }
-                    true
-                }
-                KeyEventType.KeyUp -> {
-                    if (!longFired) onClick()
-                    longFired = false
-                    true
-                }
-                else -> false
+            when (press.handle(code, ev.type == KeyEventType.KeyDown, ev.type == KeyEventType.KeyUp, ev.nativeKeyEvent.repeatCount, latestLong != null)) {
+                1 -> latestClick()
+                2 -> latestLong?.invoke()
             }
+            true
         }
         .clickable(interactionSource = null, indication = null, onClick = onClick)
 }
@@ -114,7 +110,7 @@ fun FocusRow(
             .clip(RoundedCornerShape(8.dp))
             .background(if (focused) ui.focus else if (selected) ui.selection else Color.Transparent)
             .tvClickable(onLongClick, onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) { content(focused) }
@@ -320,7 +316,31 @@ fun NumberDialog(title: String, value: Int, range: IntRange, step: Int = 1, suff
 }
 
 /** Remembers whether a key long-press fired, for screens that read keys directly. */
-class KeyPress { var longFired = false; var downAt = 0L }
+/**
+ * Press state for one key-reading element. [downCode] is the key that went down here; a key release only counts as a
+ * click when its press started on the same element. Without this, the release of a long press that opened a menu
+ * lands on the menu's first item and "clicks" it, closing the menu again.
+ */
+class KeyPress {
+    var longFired = false
+    var downAt = 0L
+    var downCode = -1
+
+    /** Call for every event of a press/long-press key. Returns what to do: 0 nothing, 1 click, 2 long press. */
+    fun handle(code: Int, isDown: Boolean, isUp: Boolean, repeat: Int, hasLong: Boolean): Int {
+        if (isDown) {
+            if (repeat == 0) { downCode = code; longFired = false; return 0 }
+            if (downCode == code && !longFired && hasLong) { longFired = true; return 2 }
+            return 0
+        }
+        if (isUp) {
+            val click = downCode == code && !longFired
+            downCode = -1; longFired = false
+            return if (click) 1 else 0
+        }
+        return 0
+    }
+}
 
 @Composable
 fun rememberCounter() = remember { mutableIntStateOf(0) }

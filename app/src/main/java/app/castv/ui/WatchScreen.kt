@@ -210,6 +210,7 @@ fun WatchScreen(vm: MainViewModel) {
             .focusRequester(focus)
             .onPreviewKeyEvent { ev ->
                 if (!onTop || (overlay != Overlay.NONE && overlay != Overlay.INFO)) return@onPreviewKeyEvent false
+                if (!hasPlaylists && catalog.ready) return@onPreviewKeyEvent false
                 val n = ev.nativeKeyEvent
                 val code = n.keyCode
                 if (code in AKeyEvent.KEYCODE_0..AKeyEvent.KEYCODE_9) {
@@ -217,28 +218,21 @@ fun WatchScreen(vm: MainViewModel) {
                     return@onPreviewKeyEvent true
                 }
                 if (code == AKeyEvent.KEYCODE_LAST_CHANNEL) { if (ev.type == KeyEventType.KeyDown) vm.lastChannel(); return@onPreviewKeyEvent true }
+                val isDown = ev.type == KeyEventType.KeyDown
+                val isUp = ev.type == KeyEventType.KeyUp
                 if (code == AKeyEvent.KEYCODE_BACK || code == AKeyEvent.KEYCODE_ESCAPE) {
-                    if (ev.type == KeyEventType.KeyDown) {
-                        if (n.repeatCount == 0) press.longFired = false
-                        else if (!press.longFired) { press.longFired = true; act(s.remote(RemoteButton.BACK_LONG)) }
-                    } else if (ev.type == KeyEventType.KeyUp && !press.longFired) onBack()
+                    when (press.handle(code, isDown, isUp, n.repeatCount, true)) {
+                        1 -> onBack()
+                        2 -> act(s.remote(RemoteButton.BACK_LONG))
+                    }
                     return@onPreviewKeyEvent true
                 }
                 if (code in longCapable) {
-                    when (ev.type) {
-                        KeyEventType.KeyDown -> {
-                            if (n.repeatCount == 0) press.longFired = false
-                            else if (!press.longFired) {
-                                press.longFired = true
-                                val b = buttonFor(code, true)
-                                if (b != null && !seekOverride(b)) act(s.remote(b))
-                            }
-                        }
-                        KeyEventType.KeyUp -> if (!press.longFired) {
-                            val b = buttonFor(code, false)
-                            if (b != null && !seekOverride(b)) act(s.remote(b))
-                        }
-                        else -> Unit
+                    // A release only counts if the press started here, so releasing a long press that opened a menu
+                    // doesn't also trigger the short-press action (or a click in the menu).
+                    when (press.handle(code, isDown, isUp, n.repeatCount, true)) {
+                        1 -> buttonFor(code, false)?.let { b -> if (!seekOverride(b)) act(s.remote(b)) }
+                        2 -> buttonFor(code, true)?.let { b -> if (!seekOverride(b)) act(s.remote(b)) }
                     }
                     return@onPreviewKeyEvent true
                 }
