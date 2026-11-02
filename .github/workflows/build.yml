@@ -101,10 +101,18 @@ jobs:
         if: steps.build.outcome == 'success'
         run: |
           v=$(tr -d '[:space:]' < version.txt)
-          name="CasTV-$v-${{ github.run_number }}.apk"
+          # The first build of a version on main is the release "v<version>"; later builds of the same version, and
+          # builds of other branches, are numbered pre-releases so they never replace a published version's APK.
+          if [ "${{ github.ref_name }}" = "main" ] && ! git ls-remote --exit-code --tags origin "refs/tags/v$v" > /dev/null; then
+            tag="v$v"; name="CasTV-$v.apk"; title="CasTV $v"; pre=false
+          else
+            tag="v$v-build${{ github.run_number }}"; name="CasTV-$v-build${{ github.run_number }}.apk"; title="CasTV $v (build ${{ github.run_number }})"; pre=true
+          fi
           cp app/build/outputs/apk/release/app-release.apk "$name"
           echo "path=$name" >> "$GITHUB_OUTPUT"
-          echo "tag=v$v-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
@@ -119,9 +127,9 @@ jobs:
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: CasTV ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
-          prerelease: ${{ github.ref_name != 'main' }}
-          make_latest: ${{ github.ref_name == 'main' }}
+          name: ${{ steps.apk.outputs.title }}
+          prerelease: ${{ steps.apk.outputs.prerelease }}
+          make_latest: ${{ steps.apk.outputs.prerelease == 'false' }}
           body: |
             CasTV for Android TV (Android 8.0+), built from ${{ github.ref_name }} @ ${{ github.sha }}.
             Install: download the APK on the TV (e.g. with a downloader app) or copy it over, open it and allow installs from unknown sources.
