@@ -31,6 +31,3 @@ or by copying it over, and allow installs from unknown sources.
 
 `gradle :app:assembleRelease` with JDK 17, Gradle 8.14 and the Android SDK (API 36). Every push builds the APK on
 GitHub Actions (`.github/workflows/build.yml`) and publishes it as a release.
-
-For a fixed release signature add the secrets `CASTV_KEYSTORE_BASE64` (keystore file, base64), `CASTV_KEYSTORE_PASSWORD`,
-`CASTV_KEY_ALIAS` and `CASTV_KEY_PASSWORD`. Without them, builds are signed with a debug key kept in the Actions cache.

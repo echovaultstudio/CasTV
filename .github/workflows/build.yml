@@ -53,7 +53,7 @@ jobs:
             printf '%s' "$CASTV_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/castv.keystore"
             echo "CASTV_KEYSTORE=$RUNNER_TEMP/castv.keystore" >> "$GITHUB_ENV"
           else
-            echo "::notice::No CASTV_KEYSTORE_BASE64 secret; using the repository's fixed debug key."
+            echo "No release key set; signing with the debug key."
           fi
 
       # Without a release key, a debug keystore kept in the Actions cache keeps the signature stable between builds,
