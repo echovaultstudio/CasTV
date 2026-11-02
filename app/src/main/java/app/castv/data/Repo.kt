@@ -122,7 +122,7 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
         inputs,
         db.prefs().observeCustomGroups(),
         db.prefs().observeCustomGroupChannels(),
-        settings.version,
+        settings.catalogVersion,
     ) { i, cg, cgc, _ -> buildCatalog(i, cg, cgc) }
         .flowOn(Dispatchers.Default)
         .stateIn(scope, SharingStarted.Eagerly, Catalog())
@@ -190,14 +190,18 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
             groups += Group(ref, cg.name, members.size)
         }
 
+        // Grouped once up front: filtering every channel for every group was slow on large playlists.
+        val visibleByPlaylist = visible.groupBy { it.playlistId }
+        val groupNamesByPlaylist = everything.groupBy { it.playlistId }.mapValues { (_, l) -> l.map { it.e.groupName }.distinct() }
         for (p in enabled) {
-            val mine = visible.filter { it.playlistId == p.id }
+            val mine = visibleByPlaylist[p.id].orEmpty()
+            val mineByGroup = mine.groupBy { it.e.groupName }
             if (multi && s.showAllPlaylistsCategory) {
                 val ref = GroupRef(GroupKind.PLAYLIST, playlistId = p.id, name = p.name)
                 byGroup[ref.id] = sortChannels(mine, "")
                 groups += Group(ref, p.name, mine.size)
             }
-            val names = everything.filter { it.playlistId == p.id }.map { it.e.groupName }.distinct()
+            val names = groupNamesByPlaylist[p.id].orEmpty()
             val sort = p.groupSort.ifEmpty { s.groupSort }
             val ordered = when (sort) {
                 "name" -> names.sortedBy { (groupPrefMap["${p.id}:$it"]?.customName?.ifBlank { null } ?: it).lowercase() }
@@ -207,7 +211,7 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
             for (g in ordered) {
                 val gp = groupPrefMap["${p.id}:$g"]
                 val ref = GroupRef(GroupKind.GROUP, playlistId = p.id, name = g)
-                val members = sortChannels(mine.filter { it.e.groupName == g }, gp?.sort.orEmpty())
+                val members = sortChannels(mineByGroup[g].orEmpty(), gp?.sort.orEmpty())
                 byGroup[ref.id] = members
                 val group = Group(ref, gp?.customName?.takeIf { it.isNotBlank() } ?: g, members.size, gp?.blocked == true, gp?.hidden == true, gp?.seen == false)
                 if (gp?.hidden == true) hiddenGroups += group else groups += group
@@ -432,6 +436,13 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
     }
 
     suspend fun toggleFavorite(c: Channel) = setFavorite(c, !c.favorite)
+
+    /** Changes many channels in one database write (one catalog rebuild instead of one per channel). */
+    suspend fun editPrefs(channels: List<Channel>, f: (Channel, ChannelPrefEntity) -> ChannelPrefEntity) {
+        if (channels.isEmpty()) return
+        val existing = db.prefs().channelPrefs().associateBy { "${it.playlistId}:${it.key}" }
+        db.prefs().upsertChannelPrefs(channels.map { c -> f(c, existing[c.uid] ?: ChannelPrefEntity(c.playlistId, c.key)) })
+    }
 
     suspend fun setFavoritesOrder(list: List<Channel>) {
         db.prefs().upsertChannelPrefs(list.mapIndexed { i, c ->

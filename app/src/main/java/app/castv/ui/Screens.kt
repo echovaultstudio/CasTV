@@ -266,9 +266,12 @@ fun ManageScreen(vm: MainViewModel, mode: String, groupId: String) {
     fun save() {
         scope.launch {
             when (mode) {
-                "favorites" -> for (c in source) { val on = c.uid in marked; if (on != c.favorite) vm.repo.setFavorite(c, on) }
-                "hidden" -> for (c in source) { val visible = c.uid in marked; if (visible == c.hidden) vm.repo.setHidden(c, !visible) }
-                "blocked" -> for (c in source) { val b = c.uid in marked; if (b != (c.pref?.blocked == true)) vm.repo.setBlocked(c, b) }
+                "favorites" -> {
+                    var next = (catalog.favorites.maxOfOrNull { it.pref?.favoritePosition ?: 0 } ?: -1) + 1
+                    vm.repo.editPrefs(source.filter { (it.uid in marked) != it.favorite }) { c, p -> p.copy(favoritePosition = if (c.uid in marked) next++ else -1) }
+                }
+                "hidden" -> vm.repo.editPrefs(source.filter { (it.uid in marked) == it.hidden }) { c, p -> p.copy(hidden = c.uid !in marked) }
+                "blocked" -> vm.repo.editPrefs(source.filter { (it.uid in marked) != (it.pref?.blocked == true) }) { c, p -> p.copy(blocked = c.uid in marked) }
                 "reorder" -> when (ref.kind) {
                     GroupKind.FAVORITES -> vm.repo.setFavoritesOrder(items)
                     GroupKind.CUSTOM -> vm.repo.setCustomGroupOrder(ref.customId, items)

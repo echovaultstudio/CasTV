@@ -527,7 +527,8 @@ fun SideMenu(vm: MainViewModel) {
     var confirmExit by remember { mutableStateOf(false) }
     val items = listOf<Pair<String, () -> Unit>>(
         "TV channels" to { vm.overlay.value = Overlay.CHANNELS },
-        "Favorites" to { vm.setGroup(GroupRef.FAVORITES); vm.overlay.value = Overlay.CHANNELS },
+        // Opens the groups overview on Favorites: favorite channels first, then the favorite groups.
+        "Favorites" to { vm.setGroup(GroupRef.FAVORITES); vm.overlay.value = Overlay.GROUPS },
         "TV guide" to { vm.open(Screen.Guide) },
         "Movies" to { vm.open(Screen.Vod("movie")) },
         "Shows" to { vm.open(Screen.Vod("series")) },

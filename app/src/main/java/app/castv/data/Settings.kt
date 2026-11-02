@@ -16,7 +16,18 @@ class Settings(context: Context) {
     val prefs: SharedPreferences = context.getSharedPreferences("castv_settings", Context.MODE_PRIVATE)
     private val _version = MutableStateFlow(0)
     val version: StateFlow<Int> = _version
-    private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> _version.value++ }
+    private val _catalogVersion = MutableStateFlow(0)
+
+    /** Changes only for settings that affect the channel catalog, so zapping (which saves the last channel) doesn't rebuild it. */
+    val catalogVersion: StateFlow<Int> = _catalogVersion
+    private val volatileKeys = setOf(
+        "lastPlaylistId", "lastChannelKey", "lastGroup", "searchHistory", "pinFailedCount", "pinLockedUntil",
+        "speedIndex", "termsAccepted", "vodSort",
+    )
+    private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        _version.value++
+        if (key == null || key !in volatileKeys) _catalogVersion.value++
+    }
 
     init {
         prefs.registerOnSharedPreferenceChangeListener(listener)
