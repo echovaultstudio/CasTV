@@ -1,4 +1,6 @@
-# CasTV
+<p align="center"><img src="docs/icon.png" width="128" alt="CasTV icon"></p>
+
+<h1 align="center">CasTV</h1>
 
 An IPTV player for Android TV (Android 8.0 and newer). CasTV doesn't include any channels or content: add playlists
 you are entitled to.

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The CasTV mark: a C around a play button with broadcast waves, on the 108dp adaptive-icon grid. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="8" android:strokeLineCap="round"
+        android:pathData="M63.38,66.04 A18,18 0 1,1 63.38,41.96" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4.5" android:strokeLineCap="round"
+        android:pathData="M73.37,42.6 A26,26 0 0,1 73.37,65.4" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4.5" android:strokeLineCap="round"
+        android:pathData="M80.81,42.17 A33,33 0 0,1 80.81,65.83" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M42,45.5 L42,62.5 L55,54 Z" />
+</vector>
