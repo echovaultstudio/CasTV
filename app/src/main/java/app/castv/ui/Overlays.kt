@@ -158,22 +158,13 @@ fun ChannelListOverlay(vm: MainViewModel, startWithGroups: Boolean) {
             if (groupsOpen) {
                 Column(Modifier.width(280.dp).fillMaxHeight().padding(vertical = 24.dp)) {
                     Label("Groups", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), size = 18, bold = true, color = ui.accent)
-                    LazyColumn(state = gState) {
+                    LazyColumn(Modifier.weight(1f), state = gState) {
                         itemsIndexed(groups, key = { _, g -> g.ref.id }) { i, g ->
-                            val sel = i == gIndex
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp))
-                                    .background(if (sel) ui.focus else if (g.ref.id == currentGroup.id) ui.selection else Color.Transparent)
-                                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Label((if (g.ref.kind == GroupKind.PLAYLIST) "▸ " else "") + g.title, Modifier.weight(1f), bold = g.ref.kind == GroupKind.PLAYLIST)
-                                if (g.blocked) Dim("🔒 ")
-                                if (g.isNew) Dim("new ")
-                                Dim(g.count.toString())
-                            }
+                            GroupRow(g, selected = i == gIndex, current = g.ref.id == currentGroup.id,
+                                dividerBelow = (g.favorite || g.ref.kind == GroupKind.FAVORITES) && groups.getOrNull(i + 1)?.let { !it.favorite } == true)
                         }
                     }
+                    Dim("Hold OK: favorite, rename, hide…", Modifier.padding(horizontal = 24.dp, vertical = 6.dp), size = 12)
                 }
             }
             Column(Modifier.width(470.dp).fillMaxHeight().padding(vertical = 24.dp)) {
@@ -274,6 +265,7 @@ fun GuideOverlay(vm: MainViewModel, fullScreen: Boolean = false) {
     val cache = remember { mutableStateMapOf<String, List<ProgrammeEntity>>() }
     var menu by remember { mutableStateOf<Pair<Channel, ProgrammeEntity?>?>(null) }
     var details by remember { mutableStateOf<Pair<Channel, ProgrammeEntity>?>(null) }
+    var groupMenu by remember { mutableStateOf<Group?>(null) }
     val scope = rememberCoroutineScope()
     val day = windowStart / 86400
 
@@ -328,8 +320,8 @@ fun GuideOverlay(vm: MainViewModel, fullScreen: Boolean = false) {
                 else -> { vm.playProgramme(c, p); if (fullScreen) vm.home() else close() }
             }
         },
-        onLongOk = { channels.getOrNull(row)?.let { menu = it to selected() } },
-        onMenu = { channels.getOrNull(row)?.let { menu = it to selected() } },
+        onLongOk = { if (groupsOpen) groupMenu = groups.getOrNull(gIndex) else channels.getOrNull(row)?.let { menu = it to selected() } },
+        onMenu = { if (groupsOpen) groupMenu = groups.getOrNull(gIndex) else channels.getOrNull(row)?.let { menu = it to selected() } },
         onInfo = { val c = channels.getOrNull(row); val p = selected(); if (c != null && p != null) details = c to p },
         onFf = { selTime += 86400; windowStart += 86400 },
         onRw = { selTime -= 86400; windowStart -= 86400 },
@@ -385,11 +377,8 @@ fun GuideOverlay(vm: MainViewModel, fullScreen: Boolean = false) {
             if (groupsOpen) {
                 LazyColumn(Modifier.width(260.dp).fillMaxHeight().padding(vertical = 8.dp)) {
                     itemsIndexed(groups) { i, g ->
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp))
-                                .background(if (i == gIndex) ui.focus else if (g.ref.id == currentGroup.id) ui.selection else Color.Transparent)
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        ) { Label(g.title, Modifier.weight(1f)); Dim(g.count.toString()) }
+                        GroupRow(g, selected = i == gIndex, current = g.ref.id == currentGroup.id,
+                            dividerBelow = (g.favorite || g.ref.kind == GroupKind.FAVORITES) && groups.getOrNull(i + 1)?.let { !it.favorite } == true)
                     }
                 }
             }
@@ -434,6 +423,32 @@ fun GuideOverlay(vm: MainViewModel, fullScreen: Boolean = false) {
         else ChannelMenu(vm, c, onDismiss = { menu = null; scope.launch { delay(50); runCatching { focus.requestFocus() } } })
     }
     details?.let { (c, p) -> ProgrammeDetails(vm, c, p) { details = null; scope.launch { delay(50); runCatching { focus.requestFocus() } } } }
+    groupMenu?.let { g -> GroupMenu(vm, g, onDismiss = { groupMenu = null; scope.launch { delay(50); runCatching { focus.requestFocus() } } }) }
+}
+
+/** One entry of the groups panel: favorites carry a star and are separated from the rest by a line. */
+@Composable
+private fun GroupRow(g: Group, selected: Boolean, current: Boolean, dividerBelow: Boolean) {
+    val ui = LocalUi.current
+    Column {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp))
+                .background(if (selected) ui.focus else if (current) ui.selection else Color.Transparent)
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                g.ref.kind == GroupKind.FAVORITES -> Label("♥ ", color = if (selected) ui.text else ui.accent)
+                g.favorite -> Label("★ ", color = if (selected) ui.text else ui.accent)
+                g.ref.kind == GroupKind.PLAYLIST -> Label("▸ ")
+            }
+            Label(g.title, Modifier.weight(1f), bold = g.ref.kind == GroupKind.PLAYLIST || g.ref.kind == GroupKind.FAVORITES)
+            if (g.blocked) Dim("🔒 ")
+            if (g.isNew) Dim("new ")
+            Dim(g.count.toString())
+        }
+        if (dividerBelow) Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).height(1.dp).background(Color(0x33FFFFFF)))
+    }
 }
 
 @Composable
@@ -512,6 +527,7 @@ fun SideMenu(vm: MainViewModel) {
     var confirmExit by remember { mutableStateOf(false) }
     val items = listOf<Pair<String, () -> Unit>>(
         "TV channels" to { vm.overlay.value = Overlay.CHANNELS },
+        "Favorites" to { vm.setGroup(GroupRef.FAVORITES); vm.overlay.value = Overlay.CHANNELS },
         "TV guide" to { vm.open(Screen.Guide) },
         "Movies" to { vm.open(Screen.Vod("movie")) },
         "Shows" to { vm.open(Screen.Vod("series")) },
@@ -600,11 +616,27 @@ fun GroupMenu(vm: MainViewModel, g: Group, onDismiss: () -> Unit) {
     var sub by remember { mutableStateOf<String?>(null) }
     val real = g.ref.kind == GroupKind.GROUP
     val custom = g.ref.kind == GroupKind.CUSTOM
+    val isFavChannels = g.ref.kind == GroupKind.FAVORITES
+    val renamed = g.title != g.originalTitle
     when (sub) {
         null -> ActionsDialog(g.title, buildList<Pair<String, () -> Unit>> {
             add("Open" to { vm.setGroup(g.ref) })
+            if (!isFavChannels) {
+                add((if (g.favorite) "Remove from favorite groups" else "Add to favorite groups") to {
+                    val on = vm.repo.toggleFavoriteGroup(g.ref)
+                    vm.say(if (on) "${g.title} is now a favorite group" else "${g.title} removed from favorite groups")
+                })
+                if (g.favorite) {
+                    add("Move up in favorites" to { vm.repo.moveFavoriteGroup(g.ref, -1) })
+                    add("Move down in favorites" to { vm.repo.moveFavoriteGroup(g.ref, 1) })
+                }
+                add("Add all its channels to Favorites" to {
+                    scope.launch { val n = vm.repo.addGroupToFavorites(g.ref); vm.say(if (n == 0) "All channels are already favorites" else "$n channels added to Favorites") }
+                })
+            }
+            add("Rename" to { sub = "rename" })
+            if (renamed && !real) add("Restore name \"${g.originalTitle}\"" to { scope.launch { vm.repo.renameAnyGroup(g.ref, "") } })
             if (real) {
-                add("Rename group" to { sub = "rename" })
                 add("Sort channels…" to { sub = "sort" })
                 add("Hide group" to { scope.launch { vm.repo.setGroupHidden(g.ref, true) } })
                 add((if (g.blocked) "Unblock group" else "Block group") to {
@@ -612,10 +644,7 @@ fun GroupMenu(vm: MainViewModel, g: Group, onDismiss: () -> Unit) {
                     else vm.withPin("Enter PIN", true) { scope.launch { vm.repo.setGroupBlocked(g.ref, !g.blocked) } }
                 })
             }
-            if (custom) {
-                add("Rename group" to { sub = "rename" })
-                add("Delete group" to { scope.launch { vm.repo.deleteCustomGroup(g.ref.customId); vm.setGroup(GroupRef.ALL) } })
-            }
+            if (custom) add("Delete group" to { scope.launch { vm.repo.deleteCustomGroup(g.ref.customId); vm.setGroup(GroupRef.ALL) } })
             if (g.ref.kind == GroupKind.HISTORY) add("Clear recent channels" to { scope.launch { vm.repo.clearHistory() } })
             add("Reorder channels" to { vm.open(Screen.Manage("reorder", g.ref.id)) })
             add("Manage favorites" to { vm.open(Screen.Manage("favorites", g.ref.id)) })
@@ -625,8 +654,8 @@ fun GroupMenu(vm: MainViewModel, g: Group, onDismiss: () -> Unit) {
             add("Reset positions" to { scope.launch { vm.repo.resetPositions(vm.catalog.value.channelsIn(g.ref)); vm.say("Positions reset") } })
             add("Create group" to { sub = "create" })
         }, onDismiss = { if (sub == null) onDismiss() })
-        "rename" -> TextInputDialog("Rename group", g.title, onDismiss = onDismiss) { n ->
-            scope.launch { if (custom) vm.repo.renameCustomGroup(g.ref.customId, n) else vm.repo.renameGroup(g.ref, n) }
+        "rename" -> TextInputDialog("Rename group", g.title, "Leave empty to restore \"${g.originalTitle}\"", onDismiss = onDismiss) { n ->
+            scope.launch { if (custom && n.isNotEmpty()) vm.repo.renameCustomGroup(g.ref.customId, n) else vm.repo.renameAnyGroup(g.ref, n) }
         }
         "create" -> TextInputDialog("New group", "", onDismiss = onDismiss) { n -> if (n.isNotEmpty()) scope.launch { vm.repo.createCustomGroup(n) } }
         "sort" -> ChoiceDialog("Sort channels", sortOptions, "", onDismiss) { v -> scope.launch { vm.repo.setGroupSort(g.ref, v) }; onDismiss() }

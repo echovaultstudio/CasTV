@@ -773,10 +773,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
-    fun groupTitle(ref: GroupRef): String = when (ref.kind) {
+    fun groupTitle(ref: GroupRef): String = catalog.value.groups.firstOrNull { it.ref.id == ref.id }?.title ?: when (ref.kind) {
         GroupKind.ALL -> "All channels"
         GroupKind.FAVORITES -> "Favorites"
         GroupKind.HISTORY -> "Recent"
-        else -> catalog.value.groups.firstOrNull { it.ref.id == ref.id }?.title ?: ref.name
+        else -> ref.name
     }
 }

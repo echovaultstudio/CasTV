@@ -55,6 +55,14 @@ enum class GroupKind { ALL, FAVORITES, HISTORY, PLAYLIST, GROUP, CUSTOM }
 data class GroupRef(val kind: GroupKind, val playlistId: Long = 0, val name: String = "", val customId: Long = 0) {
     val id: String get() = "${kind.name}:$playlistId:$customId:$name"
 
+    /** Survives renaming (own groups and playlists are keyed by number): used for favorite groups and own names. */
+    val key: String get() = when (kind) {
+        GroupKind.CUSTOM -> "CUSTOM:$customId"
+        GroupKind.PLAYLIST -> "PLAYLIST:$playlistId"
+        GroupKind.GROUP -> "GROUP:$playlistId:$name"
+        else -> kind.name
+    }
+
     companion object {
         val ALL = GroupRef(GroupKind.ALL)
         val FAVORITES = GroupRef(GroupKind.FAVORITES)
@@ -66,7 +74,10 @@ data class GroupRef(val kind: GroupKind, val playlistId: Long = 0, val name: Str
     }
 }
 
-data class Group(val ref: GroupRef, val title: String, val count: Int, val blocked: Boolean = false, val hidden: Boolean = false, val isNew: Boolean = false)
+data class Group(
+    val ref: GroupRef, val title: String, val count: Int, val blocked: Boolean = false, val hidden: Boolean = false,
+    val isNew: Boolean = false, val favorite: Boolean = false, val originalTitle: String = title,
+)
 
 data class Catalog(
     val playlists: List<PlaylistEntity> = emptyList(),
@@ -161,11 +172,11 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
 
         val all = if (multi && s.groupByPlaylistInAll) visible else sortChannels(visible, "")
         byGroup[GroupRef.ALL.id] = all
-        if (s.showAllChannelsCategory || enabled.size <= 1) groups += Group(GroupRef.ALL, "All channels", all.size)
-
         val favs = visible.filter { it.favorite }.sortedBy { it.pref?.favoritePosition ?: 0 }
         byGroup[GroupRef.FAVORITES.id] = favs
         if (s.showFavoritesCategory) groups += Group(GroupRef.FAVORITES, "Favorites", favs.size)
+
+        if (s.showAllChannelsCategory || enabled.size <= 1) groups += Group(GroupRef.ALL, "All channels", all.size)
 
         val byUid = everything.associateBy { it.uid }
         val recent = i.history.mapNotNull { byUid["${it.playlistId}:${it.key}"] }.filter { !it.hidden }.take(s.recentChannelCount.coerceAtLeast(1))
@@ -202,7 +213,19 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
                 if (gp?.hidden == true) hiddenGroups += group else groups += group
             }
         }
-        return Catalog(playlists, all, everything, groups, hiddenGroups, byGroup, ready = true)
+        // Own names for built-in categories, playlists and own groups (playlist groups keep theirs in group_prefs).
+        val named = groups.map { g ->
+            val own = if (g.ref.kind == GroupKind.GROUP) "" else s.groupName(g.ref.key)
+            if (own.isNotEmpty()) g.copy(title = own, originalTitle = g.title) else g
+        }
+        // Left panel order: Favorites (channels), then favorite groups in the user's order, then everything else.
+        val favKeys = s.favoriteGroupKeys()
+        val byKey = named.associateBy { it.ref.key }
+        val favGroups = favKeys.mapNotNull { byKey[it] }.filter { it.ref.kind != GroupKind.FAVORITES }.map { it.copy(favorite = true) }
+        val favSet = favGroups.map { it.ref.key }.toSet()
+        val favChannels = named.filter { it.ref.kind == GroupKind.FAVORITES }
+        val rest = named.filter { it.ref.kind != GroupKind.FAVORITES && it.ref.key !in favSet }
+        return Catalog(playlists, all, everything, favChannels + favGroups + rest, hiddenGroups, byGroup, ready = true)
     }
 
     private fun sortPlaylists(list: List<PlaylistEntity>) = when (settings.playlistSort) {
@@ -449,6 +472,40 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
     suspend fun setGroupSort(ref: GroupRef, sort: String) = editGroup(ref.playlistId, ref.name) { it.copy(sort = sort) }
     suspend fun markGroupsSeen() {
         db.prefs().upsertGroupPrefs(db.prefs().groupPrefs().filter { !it.seen }.map { it.copy(seen = true) })
+    }
+
+    fun isFavoriteGroup(ref: GroupRef) = ref.key in settings.favoriteGroupKeys()
+
+    fun toggleFavoriteGroup(ref: GroupRef): Boolean {
+        val keys = settings.favoriteGroupKeys()
+        val on = ref.key !in keys
+        settings.setFavoriteGroupKeys(if (on) keys + ref.key else keys - ref.key)
+        return on
+    }
+
+    fun moveFavoriteGroup(ref: GroupRef, delta: Int) {
+        val keys = settings.favoriteGroupKeys().toMutableList()
+        val i = keys.indexOf(ref.key)
+        val j = i + delta
+        if (i < 0 || j !in keys.indices) return
+        keys.add(j, keys.removeAt(i))
+        settings.setFavoriteGroupKeys(keys)
+    }
+
+    /** Renames any entry of the groups list; an empty name restores the original. */
+    suspend fun renameAnyGroup(ref: GroupRef, name: String) = when (ref.kind) {
+        GroupKind.GROUP -> renameGroup(ref, name.trim())
+        else -> settings.setGroupName(ref.key, name)
+    }
+
+    /** Adds every channel of a group to Favorites (keeping the ones already there). */
+    suspend fun addGroupToFavorites(ref: GroupRef): Int {
+        val add = catalog.value.channelsIn(ref).filter { !it.favorite }
+        var next = (catalog.value.favorites.maxOfOrNull { it.pref?.favoritePosition ?: 0 } ?: -1) + 1
+        db.prefs().upsertChannelPrefs(add.map { c ->
+            (db.prefs().channelPref(c.playlistId, c.key) ?: ChannelPrefEntity(c.playlistId, c.key)).copy(favoritePosition = next++)
+        })
+        return add.size
     }
 
     suspend fun setGroupsOrder(playlistId: Long, names: List<String>) {

@@ -202,6 +202,13 @@ class Settings(context: Context) {
     private fun hash(pin: String): String =
         MessageDigest.getInstance("SHA-256").digest(("castv:$pin").toByteArray()).joinToString("") { "%02x".format(it) }
 
+    // ---- Favorite groups (ordered) and own names for any group, by GroupRef.key
+    var favoriteGroups by str("")
+    fun favoriteGroupKeys(): List<String> = favoriteGroups.split('\n').filter { it.isNotBlank() }
+    fun setFavoriteGroupKeys(keys: List<String>) { favoriteGroups = keys.distinct().joinToString("\n") }
+    fun groupName(key: String): String = prefs.getString("gname_$key", "").orEmpty()
+    fun setGroupName(key: String, name: String) = prefs.edit().apply { if (name.isBlank()) remove("gname_$key") else putString("gname_$key", name.trim()) }.apply()
+
     fun searchHistoryList(): List<String> = searchHistory.split('\n').filter { it.isNotBlank() }
     fun addSearchHistory(q: String) {
         searchHistory = (listOf(q) + searchHistoryList().filter { it != q }).take(20).joinToString("\n")
