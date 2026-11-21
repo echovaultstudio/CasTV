@@ -26,11 +26,10 @@ class EpgImporter(private val context: Context, private val db: AppDb, private v
         val tmp = -source.id
         db.epg().deleteProgrammes(tmp)
         db.epg().deleteChannels(tmp)
-        try {
-
         val channels = ArrayList<EpgChannelEntity>()
         val batch = ArrayList<ProgrammeEntity>(2000)
         var total = 0
+        try {
 
         Http.open(context, source.url).use { input ->
             val parser = Xml.newPullParser()
