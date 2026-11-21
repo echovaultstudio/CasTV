@@ -14,7 +14,7 @@ class PlaylistLoader(private val context: Context, private val db: AppDb, privat
 
     data class Result(val channels: Int, val movies: Int, val series: Int, val epgUrls: List<String>)
 
-    suspend fun load(p: PlaylistEntity, progress: (String) -> Unit = {}): Result = withContext(Dispatchers.IO) {
+    suspend fun load(p: PlaylistEntity, progress: (String) -> Unit = {}): Result = withContext(ImportDispatcher) {
         when (p.type) {
             PlaylistType.XTREAM -> loadXtream(p, progress)
             PlaylistType.STALKER -> loadStalker(p, progress)

@@ -120,7 +120,7 @@ fun WatchScreen(vm: MainViewModel) {
     val catalog by vm.catalog.collectAsState()
     val screens by vm.screens.collectAsState()
     val onTop = screens.last() == Screen.Watch
-    vm.settingsVersion.collectAsState().value
+    vm.displayVersion.collectAsState().value
     val s = vm.settings
     val focus = remember { FocusRequester() }
     var dialog by remember { mutableStateOf<String?>(null) }

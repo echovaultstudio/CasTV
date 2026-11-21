@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val version by vm.settingsVersion.collectAsState()
+            val version by vm.displayVersion.collectAsState()
             val ui = remember(version) { uiFrom(vm.settings) }
             CasTheme(ui) { Root(vm) }
         }

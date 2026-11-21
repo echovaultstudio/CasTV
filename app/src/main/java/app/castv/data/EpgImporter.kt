@@ -6,6 +6,7 @@ import app.castv.core.Names
 import app.castv.core.XmltvTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.room.withTransaction
 import org.xmlpull.v1.XmlPullParser
 
 /** Imports an XMLTV guide into the database, keeping only the configured window of days. */
@@ -13,7 +14,7 @@ class EpgImporter(private val context: Context, private val db: AppDb, private v
 
     data class Result(val channels: Int, val programmes: Int)
 
-    suspend fun import(source: EpgSourceEntity, progress: (String) -> Unit = {}): Result = withContext(Dispatchers.IO) {
+    suspend fun import(source: EpgSourceEntity, progress: (String) -> Unit = {}): Result = withContext(ImportDispatcher) {
         progress("Downloading ${source.name}…")
         val now = System.currentTimeMillis() / 1000
         val from = now - settings.epgPastDays * 86400L
@@ -21,8 +22,11 @@ class EpgImporter(private val context: Context, private val db: AppDb, private v
         val keepDesc = settings.epgStoreDescriptions
         val shift = source.shiftSeconds
 
-        db.epg().deleteProgrammes(source.id)
-        db.epg().deleteChannels(source.id)
+        // Import under a temporary id and swap at the end, so the current guide stays visible during the update.
+        val tmp = -source.id
+        db.epg().deleteProgrammes(tmp)
+        db.epg().deleteChannels(tmp)
+        try {
 
         val channels = ArrayList<EpgChannelEntity>()
         val batch = ArrayList<ProgrammeEntity>(2000)
@@ -48,7 +52,7 @@ class EpgImporter(private val context: Context, private val db: AppDb, private v
                                     else -> skip(parser)
                                 }
                             }
-                            if (id.isNotEmpty()) channels += EpgChannelEntity(source.id, id, name.ifEmpty { id }, icon, Names.matchKey(name.ifEmpty { id }))
+                            if (id.isNotEmpty()) channels += EpgChannelEntity(tmp, id, name.ifEmpty { id }, icon, Names.matchKey(name.ifEmpty { id }))
                         }
                         "programme" -> {
                             val start = XmltvTime.parse(parser.getAttributeValue(null, "start").orEmpty(), shift)
@@ -75,7 +79,7 @@ class EpgImporter(private val context: Context, private val db: AppDb, private v
                                         else -> skip(parser)
                                     }
                                 }
-                                batch += ProgrammeEntity(sourceId = source.id, channelId = ch, start = start, stop = stop, title = title,
+                                batch += ProgrammeEntity(sourceId = tmp, channelId = ch, start = start, stop = stop, title = title,
                                     subTitle = sub, description = desc, category = cat, icon = icon, episode = ep, rating = rating, year = year)
                                 if (batch.size >= 2000) {
                                     db.epg().insertProgrammes(batch.toList()); total += batch.size; batch.clear()
@@ -90,6 +94,17 @@ class EpgImporter(private val context: Context, private val db: AppDb, private v
         }
         if (batch.isNotEmpty()) { db.epg().insertProgrammes(batch.toList()); total += batch.size }
         channels.chunked(500).forEach { db.epg().insertChannels(it) }
+        db.withTransaction {
+            db.epg().deleteProgrammes(source.id)
+            db.epg().deleteChannels(source.id)
+            db.epg().moveProgrammes(tmp, source.id)
+            db.epg().moveChannels(tmp, source.id)
+        }
+        } catch (e: Exception) {
+            db.epg().deleteProgrammes(tmp)
+            db.epg().deleteChannels(tmp)
+            throw e
+        }
         db.epg().upsertSource(source.copy(lastUpdated = System.currentTimeMillis(), lastError = "", channelCount = channels.size, programmeCount = total))
         Result(channels.size, total)
     }

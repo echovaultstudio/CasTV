@@ -533,6 +533,15 @@ interface EpgDao {
     @Query("DELETE FROM programmes")
     suspend fun deleteAllProgrammes()
 
+    @Query("UPDATE programmes SET sourceId = :to WHERE sourceId = :from")
+    suspend fun moveProgrammes(from: Long, to: Long)
+
+    @Query("UPDATE epg_channels SET sourceId = :to WHERE sourceId = :from")
+    suspend fun moveChannels(from: Long, to: Long)
+
+    @Query("DELETE FROM programmes WHERE sourceId < 0")
+    suspend fun deleteUnfinishedImports()
+
     @Query("DELETE FROM epg_channels")
     suspend fun deleteAllChannels()
 

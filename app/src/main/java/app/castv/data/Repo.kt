@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -125,6 +126,7 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
         settings.catalogVersion,
     ) { i, cg, cgc, _ -> buildCatalog(i, cg, cgc) }
         .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(scope, SharingStarted.Eagerly, Catalog())
 
     private fun buildCatalog(i: Inputs, customGroups: List<CustomGroupEntity>, customChannels: List<CustomGroupChannelEntity>): Catalog {
@@ -230,6 +232,26 @@ class Repo(private val context: Context, val db: AppDb, val settings: Settings) 
         val favChannels = named.filter { it.ref.kind == GroupKind.FAVORITES }
         val rest = named.filter { it.ref.kind != GroupKind.FAVORITES && it.ref.key !in favSet }
         return Catalog(playlists, all, everything, favChannels + favGroups + rest, hiddenGroups, byGroup, ready = true)
+    }
+
+    /**
+     * The last channel straight from the database, without building the catalog first, so playback starts at once on
+     * launch. The full channel (number, group) replaces it when the catalog is ready.
+     */
+    /** Removes guide data left by an import that was interrupted (app closed mid-update). */
+    suspend fun cleanupImports() = updateLock.withLock { db.epg().deleteUnfinishedImports() }
+
+    suspend fun quickChannel(playlistId: Long, key: String): Channel? = withContext(Dispatchers.IO) {
+        val e = db.channels().byKey(playlistId, key) ?: return@withContext null
+        val p = db.playlists().get(playlistId)?.takeIf { it.enabled } ?: return@withContext null
+        val pref = db.prefs().channelPref(playlistId, key)
+        if (pref?.hidden == true) return@withContext null
+        val blocked = db.prefs().groupPrefs().any { it.playlistId == playlistId && it.name == e.groupName && it.blocked }
+        Channel(
+            e = e, pref = pref,
+            name = pref?.customName?.takeIf { it.isNotBlank() } ?: Names.clean(e.name, Names.splitList(settings.namePrefixes), Names.splitList(settings.nameSuffixes)),
+            number = e.number, groupTitle = e.groupName, groupBlocked = blocked, groupHidden = false, playlistName = p.name,
+        )
     }
 
     private fun sortPlaylists(list: List<PlaylistEntity>) = when (settings.playlistSort) {

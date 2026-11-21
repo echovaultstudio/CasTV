@@ -52,10 +52,10 @@ object PlayerFactory {
         if (s.amlogicFix) renderers.forceDisableMediaCodecAsynchronousQueueing()
 
         val (minMs, maxMs, startMs) = when (s.bufferSize) {
-            "small" -> Triple(2_000, 15_000, 500)
+            "small" -> Triple(2_000, 15_000, 400)
             "large" -> Triple(15_000, 60_000, 3_000)
             "very_large" -> Triple(30_000, 120_000, 6_000)
-            else -> Triple(8_000, 30_000, 1_500)
+            else -> Triple(8_000, 30_000, 900)
         }
         val load = DefaultLoadControl.Builder()
             .setBufferDurationsMs(minMs, maxMs, startMs, startMs * 2)

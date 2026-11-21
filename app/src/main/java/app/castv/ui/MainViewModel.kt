@@ -118,6 +118,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val speed = MutableStateFlow(1f)
     val status: StateFlow<String> = repo.status
     val settingsVersion = settings.version
+    /** Like [settingsVersion] but not bumped by the last channel/group being saved on every switch. */
+    val displayVersion = settings.catalogVersion
     val recordings = repo.db.activity().observeRecordings().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val reminders = repo.db.activity().observeReminders().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val hasPlaylists = repo.db.playlists().observeAll().map { it.isNotEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, true)
@@ -178,17 +180,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (started) return
         started = true
         viewModelScope.launch {
+            // Play the last channel straight away, before the channel catalog is built.
+            if (settings.lastChannelOnStart && settings.lastChannelKey.isNotEmpty()) {
+                repo.quickChannel(settings.lastPlaylistId, settings.lastChannelKey)?.let { play(it, showInfo = true) }
+            }
             val cat = catalog.first { it.ready }
             group.value = GroupRef.parse(settings.lastGroup)?.takeIf { cat.byGroup.containsKey(it.id) } ?: GroupRef.ALL
-            if (settings.lastChannelOnStart) {
-                cat.find(settings.lastPlaylistId, settings.lastChannelKey)?.let { play(it, showInfo = true) }
-            }
-            if (current.value == null) cat.channels.firstOrNull()?.let { if (settings.lastChannelOnStart) play(it) }
+            val playing = current.value
+            if (playing != null) cat.find(playing.playlistId, playing.key)?.let { current.value = it }
+            else if (settings.lastChannelOnStart) cat.channels.firstOrNull()?.let { play(it) }
+            launch { Reminders.rescheduleAll(getApplication()); RecordingScheduler.rescheduleAll(getApplication()) }
+            // Updates wait until playback has settled and run on a low-priority thread.
             launch {
+                delay(90_000)
+                repo.cleanupImports()
                 if (settings.playlistUpdateOnStart) runCatching { repo.updateAllPlaylists(onlyStale = true) }
                 if (settings.epgUpdateOnStart) runCatching { repo.updateAllEpg(onlyStale = true) }
             }
-            launch { Reminders.rescheduleAll(getApplication()); RecordingScheduler.rescheduleAll(getApplication()) }
         }
     }
 
@@ -251,7 +259,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun playUnlocked(c: Channel, showInfo: Boolean) {
         val was = current.value
-        if (was != null && was.uid != c.uid) { tickWatchTime(); previous = was }
+        if (was != null && was.uid != c.uid) { tickWatchTime(flush = true); previous = was }
         lastWatchTick = System.currentTimeMillis()
         current.value = c
         mode.value = Mode.Live
@@ -354,13 +362,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         nowNext.value = repo.nowNext(c)
     }
 
-    private fun tickWatchTime() {
-        val c = current.value ?: return
-        if (!isPlaying.value || mode.value !is Mode.Live) { lastWatchTick = System.currentTimeMillis(); return }
+    private var pendingWatch: Pair<Channel, Long>? = null
+
+    /** Counts watch time in memory; it's written only when the channel changes or the app goes away. */
+    private fun tickWatchTime(flush: Boolean = false) {
+        val c = current.value
         val now = System.currentTimeMillis()
-        val secs = (now - lastWatchTick) / 1000
+        if (c != null && isPlaying.value && mode.value is Mode.Live) {
+            val secs = (now - lastWatchTick) / 1000
+            if (secs in 1..3600) {
+                val p = pendingWatch
+                pendingWatch = if (p != null && p.first.uid == c.uid) p.first to p.second + secs else {
+                    if (p != null) viewModelScope.launch { repo.addWatchTime(p.first, p.second) }
+                    c to secs
+                }
+            }
+        }
         lastWatchTick = now
-        if (secs in 1..3600) viewModelScope.launch { repo.addWatchTime(c, secs) }
+        if (flush) pendingWatch?.let { (ch, secs) -> pendingWatch = null; viewModelScope.launch { repo.addWatchTime(ch, secs) } }
     }
 
     // ---------------------------------------------------------------- catch-up
@@ -746,16 +765,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun onStop() {
         if (inPip.value) return
         saveVodProgress()
-        tickWatchTime()
+        tickWatchTime(flush = true)
         player.pause()
     }
 
     fun onStart() {
-        if (player.playbackState == Player.STATE_IDLE && current.value != null) replay()
-        else if (mode.value is Mode.Live && current.value != null) {
-            // A live stream paused for a while is stale: jump to live.
-            player.seekToDefaultPosition(); player.play()
-        }
+        val c = current.value ?: return
+        lastWatchTick = System.currentTimeMillis()
+        // A paused live connection is usually dead by now: reconnect fresh instead of resuming it.
+        if (mode.value is Mode.Live) startLive(c)
+        else if (player.playbackState == Player.STATE_IDLE) replay()
+        else player.play()
     }
 
     private fun errorText(e: PlaybackException): String = when (e.errorCode) {
@@ -768,7 +788,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         saveVodProgress()
-        tickWatchTime()
+        tickWatchTime(flush = true)
         player.release()
         super.onCleared()
     }
