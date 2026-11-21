@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.castv.CoreTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-21T06:12:28.448Z" hostname="runnervm0hi8g" time="0.093">
+  <properties/>
+  <testcase name="namesAndProxy" classname="app.castv.CoreTest" time="0.041"/>
+  <testcase name="catchupTemplates" classname="app.castv.CoreTest" time="0.02"/>
+  <testcase name="flussonicAndXtream" classname="app.castv.CoreTest" time="0.015"/>
+  <testcase name="xmltvTimes" classname="app.castv.CoreTest" time="0.005"/>
+  <testcase name="parsesM3uWithAttributesAndOptions" classname="app.castv.CoreTest" time="0.011"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

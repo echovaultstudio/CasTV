@@ -1,0 +1,6 @@
+outcome=success
+sha=62b96034b4d31a815d6ceb9681beeedd4fbd0ca9
+ref=main
+run=10
+2026-11-21T06:14:02Z
+steps: java=success sdk=success gradle=success signing=success cache=success
